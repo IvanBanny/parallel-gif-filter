@@ -1,0 +1,21 @@
+# Build outputs
+sobelf
+obj/
+
+# Processed images
+images/processed/
+
+# SLURM outputs
+*.out
+*.err
+slurm-*.out
+
+# Editor
+*.swp
+*.swo
+.nvim/
+
+# clangd
+.cache/
+compile_commands.json
+

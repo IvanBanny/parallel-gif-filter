@@ -6,29 +6,20 @@ CC=mpicc
 CFLAGS=-O3 -fopenmp -I$(HEADER_DIR)
 LDFLAGS=-lm
 
-SRC= dgif_lib.c \
-	egif_lib.c \
-	gif_err.c \
-	gif_font.c \
-	gif_hash.c \
-	gifalloc.c \
-	gif_io.c \
-	main.c \
-	openbsd-reallocarray.c \
-	quantize.c
-
-OBJ= $(OBJ_DIR)/dgif_lib.o \
+OBJ_COMMON= $(OBJ_DIR)/dgif_lib.o \
 	$(OBJ_DIR)/egif_lib.o \
 	$(OBJ_DIR)/gif_err.o \
 	$(OBJ_DIR)/gif_font.o \
 	$(OBJ_DIR)/gif_hash.o \
 	$(OBJ_DIR)/gifalloc.o \
 	$(OBJ_DIR)/gif_io.o \
-	$(OBJ_DIR)/main.o \
 	$(OBJ_DIR)/openbsd-reallocarray.o \
 	$(OBJ_DIR)/quantize.o
 
-all: $(OBJ_DIR) sobelf
+OBJ= $(OBJ_COMMON) $(OBJ_DIR)/main.o
+OBJ_MPI= $(OBJ_COMMON) $(OBJ_DIR)/main_mpi.o
+
+all: $(OBJ_DIR) sobelf sobelf_mpi
 
 $(OBJ_DIR):
 	mkdir $(OBJ_DIR)
@@ -39,6 +30,9 @@ $(OBJ_DIR)/%.o : $(SRC_DIR)/%.c
 sobelf:$(OBJ)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
+sobelf_mpi: $(OBJ_MPI)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+
 clean:
-	rm -f sobelf $(OBJ)
+	rm -f sobelf sobelf_mpi $(OBJ) $(OBJ_DIR)/main_mpi.o
 

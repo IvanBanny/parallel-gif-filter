@@ -1,14 +1,9 @@
 # Build outputs
-sobelf
+/sobelf*
 obj/
 
 # Processed images
 images/processed/
-
-# SLURM outputs
-*.out
-*.err
-slurm-*.out
 
 # Editor
 *.swp

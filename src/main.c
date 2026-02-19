@@ -115,7 +115,7 @@ void apply_blur_filter(animated_gif *image, int size, int threshold) {
             }
 
             /* Copy the middle part of the image */
-            for (j = height / 10 - size; j < height * 0.9 + size; j++) {
+            for (j = height / 10 - size; j < height - height / 10 + size; j++) {
                 for (k = size; k < width - size; k++) {
                     new[CONV(j, k, width)].r = p[i][CONV(j, k, width)].r;
                     new[CONV(j, k, width)].g = p[i][CONV(j, k, width)].g;
@@ -124,7 +124,7 @@ void apply_blur_filter(animated_gif *image, int size, int threshold) {
             }
 
             /* Apply blur on the bottom part of the image (10%) */
-            for (j = height * 0.9 + size; j < height - size; j++) {
+            for (j = height - height / 10 + size; j < height - size; j++) {
                 for (k = size; k < width - size; k++) {
                     int stencil_j, stencil_k;
                     int t_r = 0;

@@ -219,11 +219,9 @@ int cmp_desc(const void *a, const void *b) {
 
 int main(int argc, char **argv) {
     int rank, n_ranks;
-    char *input_filename;
-    char *output_filename;
+    char *input_filename, *output_filename;
     animated_gif *image;
-    double t_start, t_end;
-    double duration;
+    double t_start, t_end, duration;
 
     MPI_Init(&argc, &argv);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);

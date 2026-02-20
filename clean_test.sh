@@ -1,8 +1,8 @@
 #!/bin/bash
 
 echo "Cleaning logs/*"
-rm -f logs/*
+rm -rf logs/*
 
 echo "Cleaning images/processed/*"
-rm -f images/processed/*.gif
+rm -rf images/processed/*
 

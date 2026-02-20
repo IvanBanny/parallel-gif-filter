@@ -16,10 +16,11 @@ OBJ_COMMON= $(OBJ_DIR)/dgif_lib.o \
 	$(OBJ_DIR)/openbsd-reallocarray.o \
 	$(OBJ_DIR)/quantize.o
 
-OBJ= $(OBJ_COMMON) $(OBJ_DIR)/main.o
+OBJ_SEQ= $(OBJ_COMMON) $(OBJ_DIR)/main_seq.o
 OBJ_MPI= $(OBJ_COMMON) $(OBJ_DIR)/main_mpi.o
+OBJ_OMP= $(OBJ_COMMON) $(OBJ_DIR)/main_omp.o
 
-all: $(OBJ_DIR) sobelf sobelf_mpi
+all: $(OBJ_DIR) sobelf_seq sobelf_mpi sobelf_omp
 
 $(OBJ_DIR):
 	mkdir $(OBJ_DIR)
@@ -27,12 +28,16 @@ $(OBJ_DIR):
 $(OBJ_DIR)/%.o : $(SRC_DIR)/%.c
 	$(CC) $(CFLAGS) -c -o $@ $^
 
-sobelf:$(OBJ)
+sobelf_seq:$(OBJ_SEQ)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 sobelf_mpi: $(OBJ_MPI)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
+sobelf_omp: $(OBJ_OMP)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+
 clean:
-	rm -f sobelf sobelf_mpi $(OBJ) $(OBJ_DIR)/main_mpi.o
+	rm -f sobelf_seq sobelf_mpi sobelf_omp $(OBJ_SEQ) $(OBJ_DIR)/main_mpi.o $(OBJ_DIR)/main_omp.o
+
 

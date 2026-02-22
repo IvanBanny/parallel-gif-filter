@@ -4,5 +4,9 @@
 #SBATCH -t 00:30:00
 #SBATCH -o logs/seq.log
 
-./sobelf_seq images/original/TimelyHugeGnu.gif images/processed/TimelyHugeGnu-sobel-seq.gif
+IN_DIR="images/original"
+OUT_DIR="images/processed"
+GIF=${1:-walle}
+SCRIPT="seq"
 
+./sobelf_$SCRIPT $IN_DIR/$GIF.gif $OUT_DIR/$GIF-$SCRIPT.gif

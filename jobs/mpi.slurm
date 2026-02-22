@@ -4,5 +4,9 @@
 #SBATCH -t 00:30:00
 #SBATCH -o logs/mpi.log
 
-mpirun ./sobelf_mpi images/original/TimelyHugeGnu.gif images/processed/TimelyHugeGnu-sobel-mpi.gif
+IN_DIR="images/original"
+OUT_DIR="images/processed"
+GIF=${1:-walle}
+SCRIPT="mpi"
 
+mpirun ./sobelf_$SCRIPT $IN_DIR/$GIF.gif $OUT_DIR/$GIF-$SCRIPT.gif

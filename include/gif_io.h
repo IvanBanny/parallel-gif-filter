@@ -22,8 +22,16 @@ typedef struct animated_gif {
 
 #define CONV(l, c, nb_c) ((l) * (nb_c) + (c))
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 animated_gif *load_pixels(char *filename);
 int output_modified_read_gif(char *filename, GifFileType *g);
 int store_pixels(char *filename, animated_gif *image);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

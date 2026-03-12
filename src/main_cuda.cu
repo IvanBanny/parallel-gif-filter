@@ -231,7 +231,6 @@ void apply_blur_filter(animated_gif *image, int index, int size, int threshold, 
         checkCudaErrors(cudaDeviceSynchronize());
 
         checkCudaErrors(cudaMemcpy(&end, gpu_end_flag, sizeof(*gpu_end_flag), cudaMemcpyDeviceToHost));
-        printf("end = %i\n", end);
         if(end == 1) { break; }
 
         gray_pixel* tmp = in;
@@ -345,8 +344,6 @@ int main(int argc, char **argv) {
 
     for(int i=0;i<image->n_images;i++)
     {
-        printf("%i / %i\n", i, image->n_images);
-
         send_data_to_gpu(image, i, color_gpu);
 
         apply_gray_filter(image,i,color_gpu,gray_gpu1);

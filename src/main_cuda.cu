@@ -104,7 +104,7 @@ __global__ void blur_kernel(gray_pixel *in, gray_pixel *out, int width, int heig
     }
 }
 
-__global__ void blur_check_kernel(gray_pixel* old_gray, gray_pixel* new_gray, int width, int height, int threshold, int* end)
+__global__ void blur_check_kernel(gray_pixel* old_gray, gray_pixel* new_gray, int width, int height, int threshold, uint8_t* end)
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -115,7 +115,7 @@ __global__ void blur_check_kernel(gray_pixel* old_gray, gray_pixel* new_gray, in
 
     if(diff > threshold || -diff > threshold)
     {
-        atomicExch(end, 0);
+        *end = 0; // should be correct without atomic op since each thread writes the same value ?
     }
 }
 
@@ -215,13 +215,13 @@ void apply_blur_filter(animated_gif *image, int index, int size, int threshold, 
     dim3 block(16,16);
     dim3 grid((width + block.x - 1) / block.x, (height + block.y - 1) / block.y);
 
-    int end = 0;
-    int* gpu_end_flag = NULL;
-    checkCudaErrors(cudaMalloc((void**)&gpu_end_flag, sizeof(int)));
+    uint8_t end = 0;
+    uint8_t* gpu_end_flag = NULL;
+    checkCudaErrors(cudaMalloc((void**)&gpu_end_flag, sizeof(*gpu_end_flag)));
 
     do
     {
-        checkCudaErrors(cudaMemset(gpu_end_flag, 1, sizeof(int)));
+        checkCudaErrors(cudaMemset(gpu_end_flag, 1, sizeof(*gpu_end_flag)));
 
         blur_kernel<<<grid, block>>>(in, out, width, height, size);
         checkCudaErrors(cudaGetLastError());
@@ -230,8 +230,9 @@ void apply_blur_filter(animated_gif *image, int index, int size, int threshold, 
         checkCudaErrors(cudaGetLastError());
         checkCudaErrors(cudaDeviceSynchronize());
 
-        checkCudaErrors(cudaMemcpy(&end, gpu_end_flag, sizeof(int), cudaMemcpyDeviceToHost));
-        if(!end) { break; }
+        checkCudaErrors(cudaMemcpy(&end, gpu_end_flag, sizeof(*gpu_end_flag), cudaMemcpyDeviceToHost));
+        printf("end = %i\n", end);
+        if(end == 1) { break; }
 
         gray_pixel* tmp = in;
         in = out;
@@ -344,11 +345,14 @@ int main(int argc, char **argv) {
 
     for(int i=0;i<image->n_images;i++)
     {
+        printf("%i / %i\n", i, image->n_images);
+
         send_data_to_gpu(image, i, color_gpu);
 
         apply_gray_filter(image,i,color_gpu,gray_gpu1);
 
         apply_blur_filter(image,i,5,20,gray_gpu1,gray_gpu2);
+
 
         apply_sobel_filter(image,i,gray_gpu1,color_gpu);
 

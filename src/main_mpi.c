@@ -910,10 +910,10 @@ int main(int argc, char** argv)
     MPI_Barrier(MPI_COMM_WORLD);
     t_start = MPI_Wtime();
 
-    // Choose distribution method
-    if (n_images >= n_ranks) 
+    // Choose distribution method (should be based on the number of frames and the size of each one)
+    if (n_images * 2 >= n_ranks) 
     {
-        if(rank == 0) { printf("multiple image per rank\n"); }
+        if(rank == 0) { printf("one rank per image\n"); }
 
         run_frame_mode(image, width, height, n_images, rank, n_ranks);
     } 

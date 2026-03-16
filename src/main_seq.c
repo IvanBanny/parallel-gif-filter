@@ -201,7 +201,7 @@ void apply_sobel_filter(animated_gif *image) {
             for (k = 1; k < width - 1; ++k) {
                 int pixel_blue_no, pixel_blue_n, pixel_blue_ne;
                 int pixel_blue_so, pixel_blue_s, pixel_blue_se;
-                int pixel_blue_o, pixel_blue, pixel_blue_e;
+                int pixel_blue_o, pixel_blue_e;
 
                 float deltaX_blue;
                 float deltaY_blue;
@@ -214,7 +214,6 @@ void apply_sobel_filter(animated_gif *image) {
                 pixel_blue_s = p[i][CONV(j + 1, k, width)].b;
                 pixel_blue_se = p[i][CONV(j + 1, k + 1, width)].b;
                 pixel_blue_o = p[i][CONV(j, k - 1, width)].b;
-                pixel_blue = p[i][CONV(j, k, width)].b;
                 pixel_blue_e = p[i][CONV(j, k + 1, width)].b;
 
                 deltaX_blue = -pixel_blue_no + pixel_blue_ne -

@@ -736,7 +736,6 @@ static local_stripe distribute_stripes(animated_gif* image, const int* width, co
     stripe.data = malloc_bytes((size_t)(stripe.top_halo + stripe.local_rows + stripe.bottom_halo) * (size_t)stripe.width * sizeof(pixel), "row stripe");
 
     pixel* owned_ptr = stripe_owned_ptr(&stripe);
-    int row_nbytes = stripe.width * (int)sizeof(pixel);
 
     if (rank == 0) 
     {

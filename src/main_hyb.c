@@ -173,7 +173,7 @@ void apply_sobel_filter(pixel *p, int width, int height) {
         for (int j = 1; j < width - 1; ++j) {
             int pixel_blue_nw, pixel_blue_n, pixel_blue_ne;
             int pixel_blue_sw, pixel_blue_s, pixel_blue_se;
-            int pixel_blue_w, pixel_blue, pixel_blue_e;
+            int pixel_blue_w, pixel_blue_e;
 
             float deltaX_blue;
             float deltaY_blue;
@@ -186,7 +186,6 @@ void apply_sobel_filter(pixel *p, int width, int height) {
             pixel_blue_s = p[CONV(i + 1, j, width)].b;
             pixel_blue_se = p[CONV(i + 1, j + 1, width)].b;
             pixel_blue_w = p[CONV(i, j - 1, width)].b;
-            pixel_blue = p[CONV(i, j, width)].b;
             pixel_blue_e = p[CONV(i, j + 1, width)].b;
 
             deltaX_blue = -pixel_blue_nw + pixel_blue_ne - 2 * pixel_blue_w +
@@ -236,7 +235,7 @@ int cmp_desc(const void *a, const void *b) {
 int main(int argc, char **argv) {
     int rank, n_ranks;
     char *input_filename, *output_filename;
-    animated_gif *image;
+    animated_gif *image = NULL;
     double t_start, t_end, duration;
 
     MPI_Init(&argc, &argv);

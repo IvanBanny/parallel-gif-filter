@@ -5,22 +5,26 @@ OBJ_DIR=obj
 CC=mpicc
 NVCC=nvcc
 
-CFLAGS=-O3 -fopenmp -I$(HEADER_DIR)
-NVFLAGS=-O3 -I$(HEADER_DIR)
+CFLAGS=-O3 -fopenmp -I$(HEADER_DIR) -Wall -Wextra
+NVFLAGS=-O3 -I$(HEADER_DIR) -Xcompiler -Wall -Xcompiler -Wextra -diag-suppress 541
 
 LDFLAGS=-lm
 CUDA_LDFLAGS=-lm
 
 TARGETS = sobelf_seq sobelf_mpi sobelf_omp sobelf_hyb sobelf_cuda
 
-SRCS_COMMON = dgif_lib egif_lib gif_err gif_font gif_hash \
-			  gifalloc gif_io openbsd-reallocarray quantize
-OBJ_COMMON = $(SRCS_COMMON:%=$(OBJ_DIR)/%.o)
+SRCS_LIB = dgif_lib egif_lib gif_err gif_font gif_hash \
+		   gifalloc openbsd-reallocarray quantize
+OBJ_LIB = $(SRCS_LIB:%=$(OBJ_DIR)/%.o)
+OBJ_COMMON = $(OBJ_LIB) $(OBJ_DIR)/gif_io.o
 
 all: $(OBJ_DIR) $(TARGETS)
 
 $(OBJ_DIR):
 	mkdir $(OBJ_DIR)
+
+$(OBJ_LIB): $(OBJ_DIR)/%.o : $(SRC_DIR)/%.c
+	$(CC) -O3 -fopenmp -I$(HEADER_DIR) -c -o $@ $^
 
 $(OBJ_DIR)/%.o : $(SRC_DIR)/%.c
 	$(CC) $(CFLAGS) -c -o $@ $^

@@ -8,279 +8,299 @@
 #include <stdlib.h>
 #include <sys/time.h>
 
-#include <cuda_runtime.h>
-
 #include "gif_io.h"
 #include "helper_cuda.h"
 
-
-typedef struct
-{
+typedef struct {
     uint32_t rgba;
 } packed_pixel;
 
-typedef struct
-{
-    uint8_t gray;
-} gray_pixel;
-
+typedef struct {
+    uint8_t grey;
+} grey_pixel;
 
 // KERNELS
 
-__global__ void gray_kernel(packed_pixel *color_gpu, gray_pixel *gray_gpu1, int pixel_count)
-{
+__global__ void pack_pixels(pixel *in, packed_pixel *out, int pixel_count) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if(idx >= pixel_count)
-    {
+
+    if (idx < pixel_count) {
+        const uint8_t r = (uint8_t)in[idx].r;
+        const uint8_t g = (uint8_t)in[idx].g;
+        const uint8_t b = (uint8_t)in[idx].b;
+
+        const uint32_t rgb =
+            ((uint32_t)r << 16) | ((uint32_t)g << 8) | ((uint32_t)b);
+
+        out[idx].rgba = rgb;
+    }
+}
+
+__global__ void unpack_pixels(packed_pixel *in, pixel *out, int pixel_count) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (idx < pixel_count) {
+        uint32_t rgba = in[idx].rgba;
+        out[idx].r = (rgba >> 16) & 0xFF;
+        out[idx].g = (rgba >> 8) & 0xFF;
+        out[idx].b = rgba & 0xFF;
+    }
+}
+
+__global__ void grey_kernel(packed_pixel *d_color, grey_pixel *d_grey1,
+                            int pixel_count) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= pixel_count) {
         return;
     }
 
-    uint32_t rgba = color_gpu[idx].rgba;
+    uint32_t rgba = d_color[idx].rgba;
     uint32_t r = (rgba >> 16) & 0xFF;
     uint32_t g = (rgba >> 8) & 0xFF;
     uint32_t b = (rgba >> 0) & 0xFF;
 
-    uint32_t gray = (r + g + b) / 3;
-    if(gray > 255) { gray = 255; }
+    uint32_t grey = (r + g + b) / 3;
+    if (grey > 255) {
+        grey = 255;
+    }
 
-    gray_gpu1[idx].gray = (uint8_t)gray;
+    d_grey1[idx].grey = (uint8_t)grey;
 }
 
+__global__ void blur_kernel(grey_pixel *in, grey_pixel *out, int width,
+                            int height, int size) {
+    extern __shared__ uint8_t tile[];
+    int shmem_w = blockDim.x + 2 * size;
+    int shmem_h = blockDim.y + 2 * size;
 
-__global__ void blur_kernel(gray_pixel *in, gray_pixel *out, int width, int height, int size)
-{
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
-    if(x >= width || y >= height) { return; }
 
-    // copy everything first
+    // Load stencil into shared mem
+    for (int ly = threadIdx.y; ly < shmem_h; ly += blockDim.y) {
+        for (int lx = threadIdx.x; lx < shmem_w; lx += blockDim.x) {
+            int gx = blockIdx.x * blockDim.x + lx - size;
+            int gy = blockIdx.y * blockDim.y + ly - size;
+            gx = max(0, min(gx, width - 1));
+            gy = max(0, min(gy, height - 1));
+            tile[ly * shmem_w + lx] = in[gy * width + gx].grey;
+        }
+    }
+    __syncthreads();
+
+    if (x >= width || y >= height) {
+        return;
+    }
+
+    // Copy everything first
     int idx = y * width + x;
-    out[idx].gray = in[idx].gray;
+    out[idx].grey = in[idx].grey;
 
-    if(x < size || x >= width - size)
-    {
+    if (x < size || x >= width - size) {
         return;
     }
 
     int top_end = height / 10 - size;
-    int bot_start = (int)(height * 0.9) + size;
+    int bot_start = (int)(height - height / 10) + size;
 
-    int filter_area = (2 * size + 1) * (2 * size + 1);
-
-    // top part
-    if(y >= size && y < top_end)
-    {
+    // Blur (top + bottom)
+    if ((y >= size && y < top_end) || (y >= bot_start && y < height - size)) {
+        int filter_area = (2 * size + 1) * (2 * size + 1);
         uint32_t total = 0;
-        for(int dy = -size; dy <= size; dy++)
-        {
-            for(int dx = -size; dx <= size; dx++)
-            {
-                total += (uint32_t)in[(y + dy) * width + x + dx].gray;
+        for (int dy = -size; dy <= size; ++dy) {
+            for (int dx = -size; dx <= size; ++dx) {
+                total += (uint32_t)
+                    tile[(threadIdx.y + size + dy) * shmem_w + threadIdx.x + size + dx];
             }
         }
-        out[idx].gray = (uint8_t)(total / filter_area);
-        return;
-    }
-
-    // middule part
-    if(y >= top_end && y < bot_start)
-    {
-        return;
-    }
-
-    // bottom part
-    if(y >= bot_start && y < height - size)
-    {
-        uint32_t total = 0;
-        for(int dy = -size; dy <= size; dy++)
-        {
-            for(int dx = -size; dx <= size; dx++)
-            {
-                total += (uint32_t)in[(y + dy) * width + x + dx].gray;
-            }
-        }
-        out[idx].gray = (uint8_t)(total / filter_area);
+        out[idx].grey = (uint8_t)(total / filter_area);
         return;
     }
 }
 
-__global__ void blur_check_kernel(gray_pixel* old_gray, gray_pixel* new_gray, int width, int height, int threshold, uint8_t* end)
-{
+__global__ void blur_check_kernel(grey_pixel *old_grey, grey_pixel *new_grey,
+                                  int width, int height, int threshold,
+                                  uint8_t *end) {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
-    if(x <= 0 || y <= 0 || x >= width - 1 || y >= height - 1) { return; }
-
-    int idx = y * width + x;
-    int diff = (int)new_gray[idx].gray - (int)old_gray[idx].gray;
-
-    if(diff > threshold || -diff > threshold)
-    {
-        *end = 0; // should be correct without atomic op since each thread writes the same value ?
-    }
-}
-
-
-__global__ void sobel_kernel(gray_pixel* gray_gpu1, packed_pixel* color_gpu, int width, int height)
-{
-    int x = blockIdx.x * blockDim.x + threadIdx.x;
-    int y = blockIdx.y * blockDim.y + threadIdx.y;
-    if(x >= width || y >= height) { return; }
-
-    int idx = y * width + x;
-
-    if(x <= 0 || y <= 0 || x >= width - 1 || y >= height - 1)
-    {
-        uint8_t g = gray_gpu1[idx].gray;
-        color_gpu[idx].rgba = ((uint32_t)g << 16) | ((uint32_t)g << 8) | (uint32_t)g;
+    if (x <= 0 || y <= 0 || x >= width - 1 || y >= height - 1) {
         return;
     }
 
-    int no = gray_gpu1[(y-1)*width + (x-1)].gray;
-    int n  = gray_gpu1[(y-1)*width + (x)].gray;
-    int ne = gray_gpu1[(y-1)*width + (x+1)].gray;
+    int idx = y * width + x;
+    int diff = (int)new_grey[idx].grey - (int)old_grey[idx].grey;
 
-    int o  = gray_gpu1[(y)*width + (x-1)].gray;
-    int e  = gray_gpu1[(y)*width + (x+1)].gray;
+    if (diff > threshold || -diff > threshold) {
+        *end = 0;  // should be correct without atomic op since each thread
+                   // writes the same value ?
+    }
+}
 
-    int so = gray_gpu1[(y+1)*width + (x-1)].gray;
-    int s  = gray_gpu1[(y+1)*width + (x)].gray;
-    int se = gray_gpu1[(y+1)*width + (x+1)].gray;
+__global__ void sobel_kernel(grey_pixel *d_grey1, packed_pixel *d_color,
+                             int width, int height) {
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    if (x >= width || y >= height) {
+        return;
+    }
 
-    float dx = (ne - no) + 2 * (e - o) + (se - so);
-    float dy = (se - ne) + 2 * (s - n) + (so - no);
+    int idx = y * width + x;
+
+    if (x <= 0 || y <= 0 || x >= width - 1 || y >= height - 1) {
+        uint8_t g = d_grey1[idx].grey;
+        d_color[idx].rgba =
+            ((uint32_t)g << 16) | ((uint32_t)g << 8) | (uint32_t)g;
+        return;
+    }
+
+    int no = d_grey1[(y - 1) * width + (x - 1)].grey;
+    int n = d_grey1[(y - 1) * width + (x)].grey;
+    int ne = d_grey1[(y - 1) * width + (x + 1)].grey;
+
+    int o = d_grey1[(y)*width + (x - 1)].grey;
+    int e = d_grey1[(y)*width + (x + 1)].grey;
+
+    int so = d_grey1[(y + 1) * width + (x - 1)].grey;
+    int s = d_grey1[(y + 1) * width + (x)].grey;
+    int se = d_grey1[(y + 1) * width + (x + 1)].grey;
+
+    float dx = (float)(ne - no) + 2.0f * (e - o) + (float)(se - so);
+    float dy = (float)(se - ne) + 2.0f * (s - n) + (float)(so - no);
 
     float val = sqrtf(dx * dx + dy * dy) / 4.0f;
 
     uint8_t g = (val > 50.0f) ? 255 : 0;
 
-    uint32_t rgb = (g<<16) | (g<<8) | g;
+    uint32_t rgb = (g << 16) | (g << 8) | g;
 
-    color_gpu[idx].rgba = rgb;
+    d_color[idx].rgba = rgb;
 }
-
-
 
 // CPU
 
-void allocate_gpu_buffers(size_t max_pixel, packed_pixel** color_image_gpu, gray_pixel** gray_image_gpu1, gray_pixel** gray_image_gpu2)
-{
-    checkCudaErrors(cudaMalloc((void**)color_image_gpu, max_pixel * sizeof(packed_pixel)));
-    checkCudaErrors(cudaMalloc((void**)gray_image_gpu1, max_pixel * sizeof(gray_pixel)));
-    checkCudaErrors(cudaMalloc((void**)gray_image_gpu2, max_pixel * sizeof(gray_pixel)));
+void allocate_d_buffers(size_t max_pixel, pixel **d_unpacked_pixels,
+                        uint8_t **d_end_flag, packed_pixel **color_image_gpu,
+                        grey_pixel **grey_image_gpu1,
+                        grey_pixel **grey_image_gpu2) {
+    checkCudaErrors(cudaMalloc((void **)d_end_flag, sizeof(uint8_t)));
+    checkCudaErrors(
+        cudaMalloc((void **)d_unpacked_pixels, max_pixel * sizeof(pixel)));
+    checkCudaErrors(
+        cudaMalloc((void **)color_image_gpu, max_pixel * sizeof(packed_pixel)));
+    checkCudaErrors(
+        cudaMalloc((void **)grey_image_gpu1, max_pixel * sizeof(grey_pixel)));
+    checkCudaErrors(
+        cudaMalloc((void **)grey_image_gpu2, max_pixel * sizeof(grey_pixel)));
 }
 
-void send_data_to_gpu(animated_gif *image, int index, packed_pixel* color_image_gpu)
-{
-    const size_t pixel_count = (size_t)image->width[index] * image->height[index];
-    packed_pixel* color_packed_image_cpu = (packed_pixel*)malloc(pixel_count * sizeof(packed_pixel));
+void send_data_to_gpu(animated_gif *image, int index, pixel *d_unpacked_pixels,
+                      packed_pixel *color_image_gpu) {
+    const size_t pixel_count =
+        (size_t)image->width[index] * image->height[index];
+    const pixel *color_image_cpu = image->p[index];
 
-    const pixel* color_image_cpu = image->p[index];
+    /* Copy pixel array to device */
+    checkCudaErrors(cudaMemcpy(d_unpacked_pixels, color_image_cpu,
+                               pixel_count * sizeof(pixel),
+                               cudaMemcpyHostToDevice));
 
-    for(int pixel_idx = 0; pixel_idx < pixel_count; pixel_idx++)
-    {
-        const uint8_t r = (uint8_t) color_image_cpu[pixel_idx].r;
-        const uint8_t g = (uint8_t) color_image_cpu[pixel_idx].g;
-        const uint8_t b = (uint8_t) color_image_cpu[pixel_idx].b;
-
-        const uint32_t rgb = ((uint32_t)r << 16) | ((uint32_t)g << 8) | ((uint32_t)b);
-        
-        color_packed_image_cpu[pixel_idx].rgba = rgb;
-    }
-
-    checkCudaErrors(cudaMemcpy(color_image_gpu, color_packed_image_cpu, pixel_count * sizeof(packed_pixel), cudaMemcpyHostToDevice));
-
-    free(color_packed_image_cpu);
+    /* Pack pixels on device */
+    int block = 256;
+    pack_pixels<<<(pixel_count + block - 1) / block, block>>>(
+        d_unpacked_pixels, color_image_gpu, pixel_count);
+    checkCudaErrors(cudaGetLastError());
 }
 
-void apply_gray_filter(animated_gif *image, int index, packed_pixel* color_image_gpu, gray_pixel* gray_image_gpu)
-{
+void apply_grey_filter(animated_gif *image, int index,
+                       packed_pixel *color_image_gpu,
+                       grey_pixel *grey_image_gpu) {
     size_t pixel_count = (size_t)image->width[index] * image->height[index];
-    
+
     int block = 256;
     int grid = (int)((pixel_count + block - 1) / block);
 
-    gray_kernel<<<grid, block>>>(color_image_gpu, gray_image_gpu, (int)pixel_count);
+    grey_kernel<<<grid, block>>>(color_image_gpu, grey_image_gpu,
+                                 (int)pixel_count);
     checkCudaErrors(cudaGetLastError());
-    checkCudaErrors(cudaDeviceSynchronize());
 }
 
-void apply_blur_filter(animated_gif *image, int index, int size, int threshold, gray_pixel* gray_in, gray_pixel* gray_temp) 
-{
+void apply_blur_filter(animated_gif *image, int index, int size, int threshold,
+                       uint8_t *d_end_flag, grey_pixel *grey_in,
+                       grey_pixel *grey_temp) {
     int width = image->width[index];
     int height = image->height[index];
 
-    gray_pixel* in = gray_in;
-    gray_pixel* out = gray_temp;
+    grey_pixel *in = grey_in;
+    grey_pixel *out = grey_temp;
 
-    dim3 block(16,16);
-    dim3 grid((width + block.x - 1) / block.x, (height + block.y - 1) / block.y);
+    dim3 block(16, 16);
+    dim3 grid((width + block.x - 1) / block.x,
+              (height + block.y - 1) / block.y);
+    int shmem_size =
+        (block.x + 2 * size) * (block.y + 2 * size) * sizeof(uint8_t);
 
     uint8_t end = 0;
-    uint8_t* gpu_end_flag = NULL;
-    checkCudaErrors(cudaMalloc((void**)&gpu_end_flag, sizeof(*gpu_end_flag)));
 
-    do
-    {
-        checkCudaErrors(cudaMemset(gpu_end_flag, 1, sizeof(*gpu_end_flag)));
+    do {
+        checkCudaErrors(cudaMemset(d_end_flag, 1, sizeof(*d_end_flag)));
 
-        blur_kernel<<<grid, block>>>(in, out, width, height, size);
+        blur_kernel<<<grid, block, shmem_size>>>(in, out, width, height, size);
         checkCudaErrors(cudaGetLastError());
 
-        blur_check_kernel<<<grid, block>>>(in, out, width, height, threshold, gpu_end_flag);
+        blur_check_kernel<<<grid, block>>>(in, out, width, height, threshold,
+                                           d_end_flag);
         checkCudaErrors(cudaGetLastError());
         checkCudaErrors(cudaDeviceSynchronize());
 
-        checkCudaErrors(cudaMemcpy(&end, gpu_end_flag, sizeof(*gpu_end_flag), cudaMemcpyDeviceToHost));
-        if(end == 1) { break; }
+        checkCudaErrors(cudaMemcpy(&end, d_end_flag, sizeof(*d_end_flag),
+                                   cudaMemcpyDeviceToHost));
+        if (end == 1) {
+            break;
+        }
 
-        gray_pixel* tmp = in;
+        grey_pixel *tmp = in;
         in = out;
         out = tmp;
-    }
-    while(threshold > 0);
+    } while (threshold > 0);
 
-    if (in != gray_in) 
-    {
+    if (out != grey_in) {
         size_t pixel_count = (size_t)width * height;
-        checkCudaErrors(cudaMemcpy(gray_in, in, pixel_count * sizeof(gray_pixel), cudaMemcpyDeviceToDevice));
+        checkCudaErrors(cudaMemcpy(grey_in, out,
+                                   pixel_count * sizeof(grey_pixel),
+                                   cudaMemcpyDeviceToDevice));
     }
-
-    checkCudaErrors(cudaFree(gpu_end_flag));
-
 }
 
-void apply_sobel_filter(animated_gif *image, int index, gray_pixel* gray_gpu, packed_pixel* color_gpu) 
-{
+void apply_sobel_filter(animated_gif *image, int index, grey_pixel *d_grey,
+                        packed_pixel *d_color) {
     int width = image->width[index];
     int height = image->height[index];
 
-    dim3 block(16,16);
-    dim3 grid((width + block.x - 1) / block.x, (height + block.y - 1) / block.y);
+    dim3 block(16, 16);
+    dim3 grid((width + block.x - 1) / block.x,
+              (height + block.y - 1) / block.y);
 
-    sobel_kernel<<<grid,block>>>(gray_gpu, color_gpu, width, height);
+    sobel_kernel<<<grid, block>>>(d_grey, d_color, width, height);
     checkCudaErrors(cudaGetLastError());
-    checkCudaErrors(cudaDeviceSynchronize());
 }
 
-void fetch_data_from_gpu(animated_gif *image, int index, packed_pixel* color_image_gpu)
-{
+void fetch_data_from_gpu(animated_gif *image, int index,
+                         pixel *d_unpacked_pixels,
+                         packed_pixel *color_image_gpu) {
     int width = image->width[index];
     int height = image->height[index];
     int pixel_count = width * height;
 
-    packed_pixel* color_packed_image_cpu = (packed_pixel*)malloc(pixel_count * sizeof(packed_pixel));
-    checkCudaErrors(cudaMemcpy(color_packed_image_cpu, color_image_gpu, pixel_count * sizeof(packed_pixel), cudaMemcpyDeviceToHost));
+    /* Unpack pixels on device */
+    int block = 256;
+    unpack_pixels<<<(pixel_count + block - 1) / block, block>>>(
+        color_image_gpu, d_unpacked_pixels, pixel_count);
+    checkCudaErrors(cudaGetLastError());
 
-    pixel* color_image_cpu = image->p[index];
-    for(int i = 0; i < pixel_count; i++)
-    {
-        uint32_t rgba = color_packed_image_cpu[i].rgba;
-        color_image_cpu[i].r = (rgba >> 16) & 0xFF;
-        color_image_cpu[i].g = (rgba >> 8) & 0xFF;
-        color_image_cpu[i].b = rgba & 0xFF;
-    }
-
-    free(color_packed_image_cpu);
+    /* Copy pixel array to host */
+    checkCudaErrors(cudaMemcpy(image->p[index], d_unpacked_pixels,
+                               pixel_count * sizeof(pixel),
+                               cudaMemcpyDeviceToHost));
 }
 
 /*
@@ -312,57 +332,49 @@ int main(int argc, char **argv) {
 
     /* IMPORT Timer stop */
     gettimeofday(&t2, NULL);
-
     duration = (t2.tv_sec - t1.tv_sec) + ((t2.tv_usec - t1.tv_usec) / 1e6);
-
     printf("GIF loaded from file %s with %d image(s) in %lf s\n",
            input_filename, image->n_images, duration);
+
+    /* Warmup for fair comparison */
+    cudaFree(0);
 
     /* FILTER Timer start */
     gettimeofday(&t1, NULL);
 
-    // /* Convert the pixels into grayscale */
-    // apply_gray_filter(image);
-
-    // /* Apply blur filter with convergence value */
-    // apply_blur_filter(image, 5, 20);
-
-    // /* Apply sobel filter on pixels */
-    // apply_sobel_filter(image);
-
     size_t max_pixels = 0;
-    for (int i = 0; i < image->n_images; i++) 
-    {
+    for (int i = 0; i < image->n_images; ++i) {
         size_t pixels = (size_t)image->width[i] * (size_t)image->height[i];
-        if (pixels > max_pixels) { max_pixels = pixels; }
+        if (pixels > max_pixels) {
+            max_pixels = pixels;
+        }
     }
 
-    packed_pixel* color_gpu = NULL;
-    gray_pixel* gray_gpu1 = NULL;
-    gray_pixel* gray_gpu2 = NULL;
-    allocate_gpu_buffers(max_pixels, &color_gpu, &gray_gpu1, &gray_gpu2);
+    pixel *d_unpacked_pixels = NULL;
+    uint8_t *d_end_flag = NULL;
+    packed_pixel *d_color = NULL;
+    grey_pixel *d_grey1 = NULL;
+    grey_pixel *d_grey2 = NULL;
+    allocate_d_buffers(max_pixels, &d_unpacked_pixels, &d_end_flag, &d_color,
+                       &d_grey1, &d_grey2);
 
-    for(int i=0;i<image->n_images;i++)
-    {
-        send_data_to_gpu(image, i, color_gpu);
+    for (int i = 0; i < image->n_images; ++i) {
+        send_data_to_gpu(image, i, d_unpacked_pixels, d_color);
 
-        apply_gray_filter(image,i,color_gpu,gray_gpu1);
+        apply_grey_filter(image, i, d_color, d_grey1);
 
-        apply_blur_filter(image,i,5,20,gray_gpu1,gray_gpu2);
+        apply_blur_filter(image, i, 5, 20, d_end_flag, d_grey1, d_grey2);
 
+        apply_sobel_filter(image, i, d_grey1, d_color);
 
-        apply_sobel_filter(image,i,gray_gpu1,color_gpu);
-
-        fetch_data_from_gpu(image, i, color_gpu);
+        fetch_data_from_gpu(image, i, d_unpacked_pixels, d_color);
     }
 
-    cudaFree(color_gpu);
-    cudaFree(gray_gpu1);
-    cudaFree(gray_gpu2);
-
-    
-
-
+    cudaFree(d_unpacked_pixels);
+    cudaFree(d_end_flag);
+    cudaFree(d_color);
+    cudaFree(d_grey1);
+    cudaFree(d_grey2);
 
     /* FILTER Timer stop */
     gettimeofday(&t2, NULL);

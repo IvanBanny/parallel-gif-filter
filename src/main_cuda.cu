@@ -437,6 +437,8 @@ int main(int argc, char **argv) {
 
     printf("SOBEL done in %lf s\n", duration);
 
+#if !defined(SKIP_EXPORT)
+
     // EXPORT Timer start
     gettimeofday(&t1, NULL);
 
@@ -451,6 +453,8 @@ int main(int argc, char **argv) {
     duration = (t2.tv_sec - t1.tv_sec) + ((t2.tv_usec - t1.tv_usec) / 1e6);
 
     printf("Export done in %lf s in file %s\n", duration, output_filename);
+
+#endif
 
     return 0;
 }

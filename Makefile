@@ -8,6 +8,11 @@ NVCC=nvcc
 CFLAGS=-O3 -fopenmp -I$(HEADER_DIR) -Wall -Wextra
 NVFLAGS=-O3 -I$(HEADER_DIR) -Xcompiler -Wall -Xcompiler -Wextra -diag-suppress 541
 
+ifdef SKIP_EXPORT
+    CFLAGS += -DSKIP_EXPORT
+    NVFLAGS += -DSKIP_EXPORT
+endif
+
 LDFLAGS=-lm
 CUDA_LDFLAGS=-lm
 

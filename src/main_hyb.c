@@ -393,6 +393,8 @@ int main(int argc, char **argv) {
         printf("SOBEL done in %lf s\n", duration);
     }
 
+#if !defined(SKIP_EXPORT)
+
     /* EXPORT Timer start */
     MPI_Barrier(MPI_COMM_WORLD);
     t_start = MPI_Wtime();
@@ -410,6 +412,8 @@ int main(int argc, char **argv) {
     if (rank == 0) {
         printf("Export done in %lf s in file %s\n", duration, output_filename);
     }
+
+#endif
 
     for (int i = 0; i < n_images; ++i) {
         if (local_pixels[i]) {

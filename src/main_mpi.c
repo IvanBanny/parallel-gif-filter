@@ -932,6 +932,8 @@ int main(int argc, char** argv)
     }
 
     // Output gif
+#if !defined(SKIP_EXPORT)
+
     MPI_Barrier(MPI_COMM_WORLD);
     t_start = MPI_Wtime();
 
@@ -946,6 +948,8 @@ int main(int argc, char** argv)
     {
         printf("Export done in %lf s in file %s\n", duration, output_filename);
     }
+
+#endif
 
     // free memory
     free(width);

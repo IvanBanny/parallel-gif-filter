@@ -305,6 +305,8 @@ int main(int argc, char **argv) {
 
     printf("SOBEL done in %lf s\n", duration);
 
+#if !defined(SKIP_EXPORT)
+
     /* EXPORT Timer start */
     t_start = omp_get_wtime();
 
@@ -319,6 +321,8 @@ int main(int argc, char **argv) {
     duration = t_end - t_start;
 
     printf("Export done in %lf s in file %s\n", duration, output_filename);
+
+#endif
 
     return 0;
 }

@@ -11,7 +11,7 @@
 #include "sobel_mpi.h"
 #include "sobel_omp.h"
 
-enum STRATEGY
+enum Strategy
 {
     MPI,
     OMP,
@@ -19,14 +19,139 @@ enum STRATEGY
     CUDA
 };
 
-/*
-salloc -N1 -n1 -c8
-export OMP_NUM_THREADS=8 
-export OMP_PROC_BIND=true 
-export OMP_PLACES=cores 
-mpirun -np 1 --bind-to none ./sobelf_all images/original/1.gif images/processed/1.gif 0
+static int get_number_of_nodes() 
+{
+    char* nodes_str = getenv("SLURM_JOB_NUM_NODES");
+    if (nodes_str) 
+    {
+        printf("number of nodes : %i\n", atoi(nodes_str));
+        return atoi(nodes_str);
+    } 
+    else 
+    {
+        printf("didnt find number of nodes\n");
+        return 1;
+    }
+}
 
-*/
+
+static Strategy strategy_decision_tree(int width, int height, int pixels_per_frame, int total_pixels, int threads, int nodes, int ranks, int cuda_available)
+{
+    if (cuda_available == 0.0) 
+    {
+        if (threads <= 3) 
+        {
+            if (width <= 115) 
+            {
+                return OMP; // replaced SEQ with OMP for now
+            } 
+            else 
+            {
+                if (nodes <= 1) 
+                {
+                    return MPI;
+                } 
+                else
+                {
+                    if (ranks <= 3) 
+                    {
+                        return MPI;
+                    }
+                    else
+                    {
+                        return OMP;
+                    }
+                }
+            }
+        } 
+        else
+        {
+            if (total_pixels <= 61700)
+            {
+                if (width <= 115)
+                {
+                    return OMP; // replaced SEQ with OMP for now
+                }
+                else
+                {
+                    if (threads <= 6)
+                    {
+                        return OMP;
+                    }
+                    else 
+                    {
+                        return OMP; // replaced SEQ with OMP for now
+                    }
+                }
+            }
+            else
+            {
+                return OMP;
+            }
+        }
+    } 
+    else 
+    {
+        if (total_pixels <= 1854500) 
+        {
+            if (pixels_per_frame <= 20900) 
+            {
+                return OMP; // replaced SEQ with OMP for now
+            }
+            else 
+            {
+                if (threads <= 3) 
+                {
+                    if (total_pixels <= 491625)
+                    {
+                        return MPI;
+                    } 
+                    else 
+                    {
+                        return CUDA;
+                    }
+                } 
+                else 
+                {
+                    if (total_pixels <= 491625) 
+                    {
+                        return OMP;
+                    } 
+                    else 
+                    {
+                        return OMP;
+                    }
+                }
+            }
+        }
+        else 
+        {
+            if (total_pixels <= 8100000) 
+            {
+                if (height <= 490) 
+                {
+                    return CUDA;
+                } 
+                else 
+                {
+                    if (threads <= 3) 
+                    {
+                        return CUDA;
+                    } 
+                    else 
+                    {
+                        return OMP;
+                    }
+                }
+            } 
+            else 
+            {
+                return CUDA;
+            }
+        }
+    }
+}
+
 
 int main(int argc, char** argv)
 {
@@ -75,27 +200,26 @@ int main(int argc, char** argv)
     MPI_Barrier(MPI_COMM_WORLD);
     t_start = MPI_Wtime();
 
-    STRATEGY strategy = OMP;
+    Strategy strategy = OMP;
     // CHOOSING STRATEGY
-
-    switch(*argv[3])
+    
+    if(rank == 0)
     {
-        case '0':
-            strategy = OMP;
-            break;
-        case '1':
-            strategy = MPI;
-            break;
-        case '2':
-            strategy = HYB;
-            break;
-        case '3':
-            strategy = CUDA;
-            break;
-        default:
-            printf("wtf\n");
-            MPI_Abort(MPI_COMM_WORLD, 1);
+        int width = image->width[0];
+        int height = image->height[0];
+        int pixels_per_frame = width * height;
+        int total_pixels = pixels_per_frame * n_images;
+        int threads = omp_get_max_threads();
+        int nodes = get_number_of_nodes();
+        int ranks = n_ranks;
+        
+        int device_count = 0;
+        checkCudaErrors(cudaGetDeviceCount(&device_count));
+        int cuda_available_flag = device_count > 0 ? 1 : 0;
+
+        strategy = strategy_decision_tree(width, height, pixels_per_frame, total_pixels, threads, nodes, ranks, cuda_available_flag);
     }
+    MPI_Bcast(&strategy, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
     // CHOOSING STRATEGY - END
     t_end = MPI_Wtime();

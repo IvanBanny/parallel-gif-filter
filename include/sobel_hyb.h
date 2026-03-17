@@ -93,83 +93,86 @@ static void apply_blur_filter_hyb(pixel *p, int width, int height, int size,
         end = 1;
         ++n_iter;
 
-#pragma omp parallel for schedule(static)
-        for (int i = 0; i < height - 1; ++i) {
-            for (int j = 0; j < width - 1; ++j) {
-                new_img[CONV(i, j, width)].r = p[CONV(i, j, width)].r;
-                new_img[CONV(i, j, width)].g = p[CONV(i, j, width)].g;
-                new_img[CONV(i, j, width)].b = p[CONV(i, j, width)].b;
-            }
-        }
-
-        /* Apply blur on top part of image (10%) */
-#pragma omp parallel for schedule(static)
-        for (int i = size; i < height / 10 - size; ++i) {
-            for (int j = size; j < width - size; ++j) {
-                int stencil_i, stencil_j;
-                int t_r = 0, t_g = 0, t_b = 0;
-
-                for (stencil_i = -size; stencil_i <= size; ++stencil_i) {
-                    for (stencil_j = -size; stencil_j <= size;
-                         ++stencil_j) {
-                        t_r +=
-                            p[CONV(i + stencil_i, j + stencil_j, width)].r;
-                        t_g +=
-                            p[CONV(i + stencil_i, j + stencil_j, width)].g;
-                        t_b +=
-                            p[CONV(i + stencil_i, j + stencil_j, width)].b;
-                    }
+        #pragma omp parallel
+        {
+            #pragma omp for schedule(static)
+            for (int i = 0; i < height - 1; ++i) {
+                for (int j = 0; j < width - 1; ++j) {
+                    new_img[CONV(i, j, width)].r = p[CONV(i, j, width)].r;
+                    new_img[CONV(i, j, width)].g = p[CONV(i, j, width)].g;
+                    new_img[CONV(i, j, width)].b = p[CONV(i, j, width)].b;
                 }
-
-                new_img[CONV(i, j, width)].r =
-                    t_r / ((2 * size + 1) * (2 * size + 1));
-                new_img[CONV(i, j, width)].g =
-                    t_g / ((2 * size + 1) * (2 * size + 1));
-                new_img[CONV(i, j, width)].b =
-                    t_b / ((2 * size + 1) * (2 * size + 1));
             }
-        }
 
-        /* Copy the middle part of the image */
-#pragma omp parallel for schedule(static)
-        for (int i = height / 10 - size; i < height - height / 10 + size;
-             ++i) {
-            for (int j = size; j < width - size; ++j) {
-                new_img[CONV(i, j, width)].r = p[CONV(i, j, width)].r;
-                new_img[CONV(i, j, width)].g = p[CONV(i, j, width)].g;
-                new_img[CONV(i, j, width)].b = p[CONV(i, j, width)].b;
-            }
-        }
+            /* Apply blur on top part of image (10%) */
+            #pragma omp for schedule(static) nowait
+            for (int i = size; i < height / 10 - size; ++i) {
+                for (int j = size; j < width - size; ++j) {
+                    int stencil_i, stencil_j;
+                    int t_r = 0, t_g = 0, t_b = 0;
 
-        /* Apply blur on the bottom part of the image (10%) */
-#pragma omp parallel for schedule(static)
-        for (int i = height - height / 10 + size; i < height - size; ++i) {
-            for (int j = size; j < width - size; ++j) {
-                int stencil_i, stencil_j;
-                int t_r = 0, t_g = 0, t_b = 0;
-
-                for (stencil_i = -size; stencil_i <= size; ++stencil_i) {
-                    for (stencil_j = -size; stencil_j <= size;
-                         ++stencil_j) {
-                        t_r +=
-                            p[CONV(i + stencil_i, j + stencil_j, width)].r;
-                        t_g +=
-                            p[CONV(i + stencil_i, j + stencil_j, width)].g;
-                        t_b +=
-                            p[CONV(i + stencil_i, j + stencil_j, width)].b;
+                    for (stencil_i = -size; stencil_i <= size; ++stencil_i) {
+                        for (stencil_j = -size; stencil_j <= size;
+                            ++stencil_j) {
+                            t_r +=
+                                p[CONV(i + stencil_i, j + stencil_j, width)].r;
+                            t_g +=
+                                p[CONV(i + stencil_i, j + stencil_j, width)].g;
+                            t_b +=
+                                p[CONV(i + stencil_i, j + stencil_j, width)].b;
+                        }
                     }
-                }
 
-                new_img[CONV(i, j, width)].r =
-                    t_r / ((2 * size + 1) * (2 * size + 1));
-                new_img[CONV(i, j, width)].g =
-                    t_g / ((2 * size + 1) * (2 * size + 1));
-                new_img[CONV(i, j, width)].b =
-                    t_b / ((2 * size + 1) * (2 * size + 1));
+                    new_img[CONV(i, j, width)].r =
+                        t_r / ((2 * size + 1) * (2 * size + 1));
+                    new_img[CONV(i, j, width)].g =
+                        t_g / ((2 * size + 1) * (2 * size + 1));
+                    new_img[CONV(i, j, width)].b =
+                        t_b / ((2 * size + 1) * (2 * size + 1));
+                }
+            }
+
+            /* Copy the middle part of the image */
+            #pragma omp for schedule(static) nowait
+            for (int i = height / 10 - size; i < height - height / 10 + size;
+                ++i) {
+                for (int j = size; j < width - size; ++j) {
+                    new_img[CONV(i, j, width)].r = p[CONV(i, j, width)].r;
+                    new_img[CONV(i, j, width)].g = p[CONV(i, j, width)].g;
+                    new_img[CONV(i, j, width)].b = p[CONV(i, j, width)].b;
+                }
+            }
+
+            /* Apply blur on the bottom part of the image (10%) */
+            #pragma omp for schedule(static) nowait
+            for (int i = height - height / 10 + size; i < height - size; ++i) {
+                for (int j = size; j < width - size; ++j) {
+                    int stencil_i, stencil_j;
+                    int t_r = 0, t_g = 0, t_b = 0;
+
+                    for (stencil_i = -size; stencil_i <= size; ++stencil_i) {
+                        for (stencil_j = -size; stencil_j <= size;
+                            ++stencil_j) {
+                            t_r +=
+                                p[CONV(i + stencil_i, j + stencil_j, width)].r;
+                            t_g +=
+                                p[CONV(i + stencil_i, j + stencil_j, width)].g;
+                            t_b +=
+                                p[CONV(i + stencil_i, j + stencil_j, width)].b;
+                        }
+                    }
+
+                    new_img[CONV(i, j, width)].r =
+                        t_r / ((2 * size + 1) * (2 * size + 1));
+                    new_img[CONV(i, j, width)].g =
+                        t_g / ((2 * size + 1) * (2 * size + 1));
+                    new_img[CONV(i, j, width)].b =
+                        t_b / ((2 * size + 1) * (2 * size + 1));
+                }
             }
         }
 
-#pragma omp parallel for schedule(static) reduction(&& : end)
+        #pragma omp parallel for schedule(static) reduction(&& : end)
         for (int i = 1; i < height - 1; ++i) {
             for (int j = 1; j < width - 1; ++j) {
                 float diff_r, diff_g, diff_b;
